@@ -34,3 +34,7 @@ coverage/
 .vite/
 .turbo/
 *.tsbuildinfo
+
+# 页脉探针运行期数据（SQLite 与原件副本）
+data/
+*.db

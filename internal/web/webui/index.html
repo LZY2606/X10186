@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>页脉探针</title>
+<style>
+:root{
+ --bg:#0f1420; --panel:#171e2e; --panel2:#1e2740; --line:#2b3656;
+ --txt:#e6ecf8; --mut:#93a0bd; --acc:#5aa2ff; --ok:#43c08a; --warn:#e8b14a;
+ --err:#ef6f6f; --heur:#c08bff; --free:#7a86a3;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);
+ font:14px/1.5 -apple-system,"PingFang SC","Microsoft YaHei",Segoe UI,sans-serif}
+header{padding:14px 20px;border-bottom:1px solid var(--line);
+ display:flex;align-items:center;gap:16px;background:linear-gradient(180deg,#131a2b,#0f1420)}
+header h1{font-size:18px;margin:0;letter-spacing:2px}
+header .sub{color:var(--mut);font-size:12px}
+.wrap{display:grid;grid-template-columns:260px 1fr 380px;gap:0;min-height:calc(100vh - 56px)}
+.col{padding:14px;overflow:auto;height:calc(100vh - 56px)}
+.col + .col{border-left:1px solid var(--line)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px}
+.card h2{font-size:13px;margin:0 0 10px;color:var(--mut);letter-spacing:1px;text-transform:uppercase}
+button{background:var(--acc);color:#08111f;border:0;border-radius:7px;padding:7px 12px;font-weight:600;cursor:pointer}
+button.ghost{background:transparent;color:var(--acc);border:1px solid var(--line)}
+button.small{padding:3px 8px;font-size:12px}
+button:disabled{opacity:.45;cursor:not-allowed}
+select,input[type=text]{background:var(--panel2);color:var(--txt);border:1px solid var(--line);
+ border-radius:6px;padding:6px 8px;width:100%}
+.muted{color:var(--mut)}
+.row{display:flex;gap:8px;align-items:center}
+.docitem{padding:9px 10px;border:1px solid var(--line);border-radius:8px;margin-bottom:8px;cursor:pointer}
+.docitem:hover,.docitem.active{border-color:var(--acc);background:var(--panel2)}
+.pill{display:inline-block;padding:1px 7px;border-radius:99px;font-size:11px;border:1px solid var(--line)}
+.pill.table{color:#8fd0ff}.pill.stream{color:#b6f0c8}
+.pill.declared{color:#8fd0ff}.pill.heuristic{color:var(--heur)}
+.pill.free{color:var(--free)}.pill.valid{color:var(--ok)}.pill.invalid{color:var(--err)}
+.pill.warn{color:var(--warn)}.pill.error{color:var(--err)}.pill.info{color:var(--mut)}
+.timeline{position:relative;padding-left:18px}
+.timeline::before{content:"";position:absolute;left:6px;top:4px;bottom:4px;width:2px;background:var(--line)}
+.rev{position:relative;padding:8px 10px;border:1px solid var(--line);border-radius:8px;margin-bottom:10px;background:var(--panel2)}
+.rev::before{content:"";position:absolute;left:-17px;top:14px;width:9px;height:9px;border-radius:50%;background:var(--acc)}
+.objrow{display:flex;gap:6px;align-items:center;padding:5px 8px;border:1px solid var(--line);
+ border-radius:7px;margin-bottom:5px;cursor:pointer;font-family:ui-monospace,Menlo,monospace;font-size:12px}
+.objrow:hover{border-color:var(--acc)}
+.objrow.sel{border-color:var(--acc);background:var(--panel2)}
+#graph{width:100%;height:300px;background:#0b101c;border:1px solid var(--line);border-radius:8px}
+table{border-collapse:collapse;width:100%;font-size:12px}
+td,th{border-bottom:1px solid var(--line);padding:4px 6px;text-align:left;vertical-align:top}
+th{color:var(--mut);font-weight:600}
+pre{background:#0b101c;border:1px solid var(--line);border-radius:8px;padding:10px;
+ overflow:auto;max-height:340px;font-size:12px;margin:0}
+.hex td{font-family:ui-monospace,Menlo,monospace;white-space:pre;color:#c9d6f2}
+.hex .off{color:var(--mut)}
+.kv{display:grid;grid-template-columns:96px 1fr;gap:3px 10px;font-size:12px}
+.kv .k{color:var(--mut)}
+.cand{border:1px solid var(--line);border-radius:8px;padding:9px;margin-bottom:8px;background:var(--panel2)}
+.cand.chosen{border-color:var(--ok)}
+.tabs{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap}
+.tabs button{background:var(--panel2);color:var(--mut);border:1px solid var(--line)}
+.tabs button.on{color:var(--txt);border-color:var(--acc)}
+.hidden{display:none}
+a{color:var(--acc)}
+.toast{position:fixed;right:16px;bottom:16px;background:var(--panel2);border:1px solid var(--acc);
+ padding:10px 14px;border-radius:8px;opacity:0;transition:.25s}
+.toast.show{opacity:1}
+.edge{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--mut)}
+</style>
+</head>
+<body>
+<header>
+  <h1>页脉探针</h1>
+  <span class="sub">PDF 增量修订历史 · 只读字节证据 · 声明与启发式分离</span>
+  <span style="flex:1"></span>
+  <input id="file" type="file" accept="application/pdf,.pdf" class="hidden">
+  <button onclick="document.getElementById('file').click()">导入 PDF（按字节保存）</button>
+  <a id="exportLink"><button class="ghost" id="exportBtn" disabled>导出审阅清单 ZIP</button></a>
+</header>
+<div class="wrap">
+ <!-- 左：文档 + 时间轴 + 分支 -->
+ <div class="col">
+   <div class="card">
+     <h2>已导入文档</h2>
+     <div id="doclist" class="muted">加载中…</div>
+   </div>
+   <div class="card" id="revCard">
+     <h2>修订时间轴</h2>
+     <div id="timeline" class="muted">导入后显示</div>
+   </div>
+   <div class="card">
+     <h2>解释分支</h2>
+     <div id="branchList" class="muted">导入后显示</div>
+     <div class="row" style="margin-top:8px">
+       <input type="text" id="newBranchName" placeholder="新分支名，如：采信启发式#12" style="flex:1">
+       <button class="small" onclick="createBranch()">建分支</button>
+     </div>
+     <div id="conflictBox" class="muted" style="margin-top:8px;font-size:12px"></div>
+   </div>
+ </div>
+ <!-- 中：对象列表 + 关系图 -->
+ <div class="col">
+   <div class="card">
+     <h2>对象版本图</h2>
+     <div class="row" style="margin-bottom:8px">
+       <input type="text" id="filter" placeholder="按对象号 / 类型过滤（如 4、Page、ObjStm）" oninput="renderObjects()">
+       <select id="revFilter" onchange="renderObjects()"></select>
+     </div>
+     <div id="objects" class="muted">选择左侧文档</div>
+   </div>
+   <div class="card">
+     <h2>对象关系图（当前分支）</h2>
+     <canvas id="graph" width="760" height="300"></canvas>
+     <div class="muted" style="font-size:11px;margin-top:6px">
+       蓝=声明当选 紫=启发式 灰=free；点击节点等同选中对象
+     </div>
+   </div>
+ </div>
+ <!-- 右：详情 -->
+ <div class="col">
+   <div class="card">
+     <h2>对象详情</h2>
+     <div id="detail" class="muted">在中间选择一个对象候选</div>
+   </div>
+   <div class="card">
+     <h2>原始十六进制片段</h2>
+     <div id="hex" class="muted">选择候选后显示</div>
+   </div>
+   <div class="card">
+     <h2>损坏诊断与恢复候选</h2>
+     <div id="diags" class="muted">选择文档后显示</div>
+   </div>
+ </div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+const $ = s => document.querySelector(s);
+const state = { docs:null, docId:null, report:null, graph:null, branches:null,
+  branchId:null, selObj:null, selCand:null };
+
+function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show');
+ setTimeout(()=>t.classList.remove('show'),2200); }
+const api = async (path, opts) => {
+ const res = await fetch(path, opts);
+ if(!res.ok){ let m=await res.text(); try{ m=JSON.parse(m).error||m }catch(e){}
+  throw new Error(m); }
+ return res.json();
+};
+const esc = s => String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const hex2 = n => '0x'+Number(n).toString(16).toUpperCase();
+
+async function loadDocs(){
+ state.docs = await api('/api/documents');
+ const el=$('#doclist'); el.innerHTML='';
+ if(!state.docs.length){ el.textContent='尚未导入文档'; return; }
+ for(const d of state.docs){
+  const div=document.createElement('div');
+  div.className='docitem'+(d.id===state.docId?' active':'');
+  div.innerHTML=`<b>${esc(d.name)}</b><div class="muted" style="font-size:11px">
+   #${d.id} · ${d.size} 字节 · ${new Date(d.importedAt).toLocaleString()}</div>`;
+  div.onclick=()=>selectDoc(d.id);
+  el.appendChild(div);
+ }
+}
+
+async function selectDoc(id){
+ state.docId=id; state.selObj=null; state.selCand=null;
+ const [report, branches] = await Promise.all([
+  api(`/api/documents/${id}/report`),
+  api(`/api/documents/${id}/branches`)]);
+ state.report=report; state.branches=branches;
+ const def=branches.find(b=>b.name==='default')||branches[0];
+ await selectBranch(def.id);
+ loadDocs(); renderTimeline(); renderDiags();
+ $('#exportBtn').disabled=false;
+}
+
+async function selectBranch(bid){
+ state.branchId=bid;
+ state.graph = await api(`/api/documents/${state.docId}/graph?branch=${bid}`);
+ renderBranch(); renderRevFilter(); renderObjects(); drawGraph();
+ renderDetail();
+}
+
+function renderBranch(){
+ const el=$('#branchList'); el.innerHTML='';
+ for(const b of state.branches){
+  const div=document.createElement('div');
+  div.className='docitem'+(b.id===state.branchId?' active':'');
+  div.innerHTML=`<b>${esc(b.name)}</b> <span class="muted" style="font-size:11px">#${b.id}</b></span>
+   <div class="muted" style="font-size:11px">父分支 ${b.parentId??'—'} · ${esc(b.note||'')}</div>`;
+  div.onclick=()=>selectBranch(b.id);
+  el.appendChild(div);
+ }
+ const c=$('#conflictBox');
+ if(state.graph.conflicts && state.graph.conflicts.length){
+  c.innerHTML=`<span class="pill warn">${state.graph.conflicts.length} 个竞争待确认</span><br>`+
+   state.graph.conflicts.map(k=>'对象·修订 '+k).join('、');
+ } else c.textContent='当前分支没有未决竞争。';
+}
+
+async function createBranch(){
+ const name=$('#newBranchName').value.trim(); if(!name){toast('请输入分支名');return;}
+ const parent=state.branchId;
+ await api(`/api/documents/${state.docId}/branches/create`,{method:'POST',
+  headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({name,parentId:parent,note:'从 #'+parent+' 分叉；旧分支仍可复现'})});
+ $('#newBranchName').value='';
+ const branches=await api(`/api/documents/${state.docId}/branches`);
+ state.branches=branches;
+ const nb=branches[branches.length-1]; await selectBranch(nb.id);
+ toast('已创建并切换到分支 '+name);
+}
+
+function renderTimeline(){
+ const r=state.report;
+ $('#timeline').innerHTML=r.revisions.map(rev=>`
+  <div class="rev"><b>修订 ${rev.index}</b>
+   <span class="pill ${rev.kind}">${rev.kind}</span>
+   <div class="muted" style="font-size:11px;margin-top:4px">
+    xref @${hex2(rev.xRefOffset)} · Prev ${rev.prev>=0?hex2(rev.prev):'—'}<br>
+    新增对象区 [${hex2(rev.regionStart)}, ${hex2(rev.regionEnd)})<br>
+    Size ${rev.size} · Root ${rev.rootNum} ${rev.rootGen} R
+   </div></div>`).join('')
+ + (r.trailingLen?`<div class="pill warn">尾随数据 ${r.trailingLen} 字节 @${hex2(r.trailingFrom)}</div>`:'');
+}
+
+function renderRevFilter(){
+ const sel=$('#revFilter');
+ const cur=sel.value;
+ sel.innerHTML='<option value="-999">全部修订</option>'+
+  state.report.revisions.map(r=>`<option value="${r.index}">修订 ${r.index} · ${r.kind}</option>`).join('');
+ sel.value=cur;
+}
+
+function renderObjects(){
+ const f=$('#filter').value.trim().toLowerCase();
+ const rv=$('#revFilter').value;
+ const g=state.graph; if(!g) return;
+ const nums=Object.keys(g.objects).map(Number).sort((a,b)=>a-b);
+ const rows=[];
+ for(const n of nums){
+  const ov=g.objects[n];
+  let htmls=[];
+  for(const [rstr,cands] of Object.entries(ov.revisions)){
+   const r=Number(rstr);
+   if(rv!=='-999' && r!==Number(rv)) continue;
+   for(const rc of cands){
+    const c=rc.candidate||rc;
+    const type=objType(c);
+    if(f && !String(n).includes(f) && !type.toLowerCase().includes(f)) continue;
+    const mark=rc.chosen?'✓':'';
+    const cls=c.free?'free':(c.kind==='heuristic'?'heuristic':'declared');
+    const valid=c.valid?'valid':'invalid';
+    htmls.push(`<span class="pill ${cls}">${c.kind==='heuristic'?'启发':'声明'}</span>
+     <span class="pill ${valid}">${c.valid?'有效':'损坏'}</span>
+     ${c.free?'<span class="pill free">free g'+c.gen+'</span>':''}
+     <span class="muted">rev${r}${c.inObjStm?' · ObjStm '+c.containerObj:''}</span>
+     <span style="margin-left:auto;color:var(--ok)">${mark}</span>`);
+    rows.push({n,r,c,html:htmls[htmls.length-1]});
+   }
+  }
+ }
+ const el=$('#objects');
+ if(!rows.length){el.innerHTML='<span class="muted">无匹配对象</span>';return;}
+ el.innerHTML=rows.map(x=>`
+  <div class="objrow ${state.selObj===x.n?'sel':''}" onclick="selectCand(${x.n},${x.c.id})">
+   <b>${x.n}</b> ${x.html}</div>`).join('');
+}
+
+function dictGet(v,k){ if(!v||(v.kind!=='dict'&&v.kind!=='stream')) return null;
+ for(const e of (v.entries||[])) if(e.key===k) return e.value; return null; }
+function objType(c){
+ const t=c.parsed?dictGet(c.parsed,'Type'):null;
+ if(t&&t.kind==='name') return t.text;
+ if(c.inObjStm) return 'compressed';
+ if(c.stream) return 'stream';
+ return c.parsed?c.parsed.kind:'?';
+}
+function selectCand(objNum,candId){
+ state.selObj=objNum;
+ const ov=state.graph.objects[objNum];
+ let found=null;
+ for(const cands of Object.values(ov.revisions)) for(const rc of cands)
+  if(rc.id===candId) found=rc;
+ state.selCand=found||null;
+ renderObjects(); renderDetail();
+}
+
+function findCand(id){
+ for(const ov of Object.values(state.graph.objects))
+  for(const cands of Object.values(ov.revisions))
+   for(const rc of cands) if(rc.id===id) return rc;
+ return null;
+}
+
+function renderDetail(){
+ const el=$('#detail'); const rc=state.selCand;
+ if(!rc){el.className='muted';el.textContent='在中间选择一个对象候选';$('#hex').className='muted';$('#hex').textContent='选择候选后显示';return;}
+ el.className='';
+ const c=rc;
+ const refsIn=(state.report.edges||[]).filter(e=>e.fromObj===c.objNum);
+ const refsOut=(state.report.edges||[]).filter(e=>e.toObj===c.objNum);
+ el.innerHTML=`
+ <div class="cand ${rc.chosen?'chosen':''}">
+  <div class="row" style="justify-content:space-between">
+   <b>对象 ${c.objNum} · 修订 ${c.revision} · 候选 #${c.id}</b>
+   ${rc.chosen?'<span class="pill valid">当前分支选用</span>':''}
+  </div>
+  <div style="margin:6px 0">
+   <span class="pill ${c.kind}">${c.kind==='heuristic'?'启发式找到':'按声明找到'}</span>
+   <span class="pill ${c.valid?'valid':'invalid'}">${c.valid?'核验通过':'未通过核验'}</span>
+   ${c.free?'<span class="pill free">FREE 代次 '+c.gen+'</span>':''}
+   ${c.inObjStm?`<span class="pill heuristic">压缩于 ObjStm ${c.containerObj}</span>`:''}
+  </div>
+  <div class="kv">
+   <div class="k">字节范围</div><div>[${hex2(Math.max(c.offset,0))}, ${hex2(Math.max(c.endOffset,0))}) ${c.offset<0?'(无独立偏移)':''}</div>
+   <div class="k">声明代次</div><div>${c.declGen}</div>
+   <div class="k">所属修订</div><div>${c.revision<0?'尾部未归属':('修订 '+c.revision)}</div>
+   <div class="k">原因</div><div>${esc(c.reason||'—')}</div>
+   <div class="k">证据</div><div>${esc(c.evidence||'—')}</div>
+   ${c.stream?`<div class="k">流核验</div><div>filters=[${(c.filters||[]).join(',')||'无'}]
+      长度=${c.streamLen} 展开=${c.expanded?('是 '+c.expandedLen+' 字节'):'否'}
+      ${c.expandNote?(' · '+esc(c.expandNote)):''}</div>`:''}
+   ${c.inObjStm?`<div class="k">内层区间</div><div>[${c.innerOff}, ${c.innerOff+c.innerLen}) @候选#${c.containerCand}</div>`:''}
+  </div>
+  <div style="margin-top:8px" class="row">
+   <button class="small ${rc.chosen?'ghost':''}" onclick="confirmCand(${c.objNum},${c.revision},${c.id})">
+    ${rc.chosen?'已选用（点此记为再次确认）':'在当前分支确认此候选'}</button>
+  </div>
+ </div>
+ <h2 style="font-size:12px;color:var(--mut)">解析值</h2>
+ <pre>${esc(JSON.stringify(c.parsed||{note:'free 条目无解析值'},null,2))}</pre>
+ <h2 style="font-size:12px;color:var(--mut);margin-top:10px">引用关系（证据偏移）</h2>
+ <div><b>它引用：</b>${refsIn.length?refsIn.map(e=>
+  `<div class="edge">→ ${e.toObj} ${e.toGen}R @${hex2(e.offset)}${e.inExpanded?' (解压内)':''} ${esc(e.context)}</div>`).join(''):'<span class="muted">无</span>'}</div>
+ <div style="margin-top:6px"><b>被引用：</b>${refsOut.length?refsOut.map(e=>
+  `<div class="edge">← ${e.fromObj===0?'trailer':e.fromObj}R @${hex2(e.offset)} ${esc(e.context)}</div>`).join(''):'<span class="muted">无</span>'}</div>`;
+ renderHex(c);
+}
+
+async function confirmCand(objNum,revision,candId){
+ try{
+  await api(`/api/documents/${state.docId}/branches/${state.branchId}/choose`,{method:'POST',
+   headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({objNum,revision,candId,note:'人工确认，不按偏移自动决定'})});
+  state.graph=await api(`/api/documents/${state.docId}/graph?branch=${state.branchId}`);
+  state.selCand=findCand(candId);
+  renderObjects();renderDetail();renderBranch();drawGraph();
+  toast('已记录确认');
+ }catch(e){toast(e.message);}
+}
+
+async function renderHex(c){
+ const el=$('#hex'); el.className='';
+ if(c.offset<0){ el.textContent='压缩对象无独立文件偏移；其字节在 ObjStm 展开区间内（见导出 ZIP）。'; return; }
+ let off=c.offset, len=Math.min(Math.max(c.endOffset-c.offset,1),512);
+ try{
+  const d=await api(`/api/documents/${state.docId}/bytes?offset=${off}&length=${len}`);
+  el.innerHTML=`<table class="hex"><tbody>${d.hex.map(r=>
+   `<tr><td class="off">${hex2(r.offset)}</td><td>${esc(r.hex)}</td><td>${esc(r.ascii)}</td></tr>`).join('')}
+   </tbody></table>
+   <div class="muted" style="font-size:11px;margin-top:6px">显示前 ${d.length} 字节（原件只读切片）</div>`;
+ }catch(e){el.textContent='读取失败: '+e.message;}
+}
+
+function renderDiags(){
+ const ds=state.report.diagnostics||[];
+ const el=$('#diags');
+ if(!ds.length){el.innerHTML='<span class="pill valid">未发现结构异常</span>';return;}
+ el.innerHTML=ds.map(d=>`<div style="margin-bottom:8px">
+  <span class="pill ${d.level}">${d.level.toUpperCase()}</span>
+  <span class="muted" style="font-size:11px">${esc(d.code)} @${hex2(d.offset)}</span>
+  <div>${esc(d.message)}</div>
+  ${d.evidence?`<pre style="max-height:60px;margin-top:3px">${esc(d.evidence)}</pre>`:''}
+ </div>`).join('');
+}
+
+// ---- 极简力导向关系图 ----
+let nodes=[],links=[],sim=null;
+function drawGraph(){
+ const cv=$('#graph'); const ctx=cv.getContext('2d');
+ const r=state.report, g=state.graph;
+ const chosenByObj={};
+ for(const [n,ov] of Object.entries(g.objects)){
+  outer: for(const cands of Object.values(ov.revisions)) for(const rc of cands)
+   if(rc.chosen){chosenByObj[n]=rc.kind;break outer;}
+ }
+ const ids=new Set(Object.keys(g.objects).map(Number)); ids.add(0);
+ nodes=[...ids].map((n,i)=>({n,x:(i*53)%cv.width,y:(i*97)%cv.height,vx:0,vy:0}));
+ const pos=Object.fromEntries(nodes.map(x=>[x.n,x]));
+ links=(r.edges||[]).filter(e=>ids.has(e.toObj)).map(e=>({a:pos[e.fromObj],b:pos[e.toObj]}));
+ for(let k=0;k<120;k++){
+  for(const x of nodes){x.vx*=.8;x.vy*=.8;}
+  for(let i=0;i<nodes.length;i++)for(let j=i+1;j<nodes.length;j++){
+   const a=nodes[i],b=nodes[j];let dx=a.x-b.x,dy=a.y-b.y;let d2=dx*dx+dy*dy||1;
+   const f=1200/d2;const d=Math.sqrt(d2);
+   a.vx+=dx/d*f;a.vy+=dy/d*f;b.vx-=dx/d*f;b.vy-=dy/d*f;
+  }
+  for(const l of links){if(!l.a||!l.b)continue;let dx=l.b.x-l.a.x,dy=l.b.y-l.a.y;let d=Math.hypot(dx,dy)||1;
+   const f=(d-90)*.01;l.a.vx+=dx/d*f;l.a.vy+=dy/d*f;l.b.vx-=dx/d*f;l.b.vy-=dy/d*f;}
+  for(const x of nodes){x.x+=x.vx;x.y+=x.vy;
+   x.x=Math.max(20,Math.min(cv.width-20,x.x));x.y=Math.max(16,Math.min(cv.height-16,x.y));}
+ }
+ ctx.clearRect(0,0,cv.width,cv.height);
+ ctx.strokeStyle='#2b3656';ctx.lineWidth=1;
+ for(const l of links){if(!l.a||!l.b)continue;ctx.beginPath();ctx.moveTo(l.a.x,l.a.y);ctx.lineTo(l.b.x,l.b.y);ctx.stroke();}
+ for(const x of nodes){
+  const isSel=state.selObj===x.n;
+  ctx.beginPath();ctx.arc(x.x,x.y,isSel?8:6,0,7);
+  ctx.fillStyle=x.n===0?'#7a86a3':(chosenByObj[x.n]==='heuristic'?'#c08bff':'#5aa2ff');
+  ctx.fill();
+  if(isSel){ctx.strokeStyle='#fff';ctx.stroke();}
+  ctx.fillStyle='#c9d6f2';ctx.font='11px monospace';ctx.fillText(x.n===0?'trailer':String(x.n),x.x+9,x.y+4);
+ }
+ cv.onclick=ev=>{
+  const rect=cv.getBoundingClientRect();const mx=ev.clientX-rect.left,my=ev.clientY-rect.top;
+  for(const x of nodes){if(Math.hypot(x.x-mx,x.y-my)<10 && x.n!==0){
+   const ov=state.graph.objects[x.n];
+   let pick=null;
+   const revs=Object.keys(ov.revisions).map(Number).sort((a,b)=>b-a);
+   pick=ov.revisions[revs[0]].find(r=>r.chosen)||ov.revisions[revs[0]][0];
+   selectCand(x.n,pick.id);return;}}
+ };
+}
+
+// ---- 上传 / 导出 ----
+$('#file').addEventListener('change',async ev=>{
+ const f=ev.target.files[0]; if(!f) return;
+ const fd=new FormData();fd.append('file',f);
+ toast('扫描中（只读，不重写原件）…');
+ try{
+  const res=await api('/api/import',{method:'POST',body:fd});
+  await loadDocs(); await selectDoc(res.id);
+  toast('导入完成：文档 #'+res.id);
+ }catch(e){toast('导入失败: '+e.message);}
+ ev.target.value='';
+});
+$('#exportBtn').onclick=()=>{ if(!state.docId) return;
+ $('#exportLink').href=`/api/documents/${state.docId}/export?branch=${state.branchId}`;
+};
+
+loadDocs().catch(e=>toast(e.message));
+window.addEventListener('resize',()=>{if(state.graph)drawGraph();});
+</script>
+</body>
+</html>
