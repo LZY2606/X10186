@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>页脉探针 · PDF 增量修订取证</title>
+<style>
+:root{
+  --bg:#0e1116; --panel:#151a22; --panel2:#1b222d; --line:#27313f;
+  --fg:#e6edf3; --muted:#8b98a8; --accent:#4cc2ff; --accent2:#7ee787;
+  --warn:#e3b341; --err:#ff7b72; --decl:#79c0ff; --heur:#d2a8ff; --objstm:#56d4dd; --free:#8b98a8;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.5 -apple-system,"PingFang SC","Microsoft YaHei",monospace}
+header{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:16px;background:linear-gradient(180deg,#12171f,#0e1116)}
+header h1{font-size:18px;margin:0;letter-spacing:2px}
+header .sub{color:var(--muted);font-size:12px}
+.badge{border:1px solid var(--line);border-radius:4px;padding:2px 8px;color:var(--muted)}
+main{display:grid;grid-template-columns:260px 1fr 380px;gap:0;height:calc(100vh - 51px)}
+.col{overflow:auto;padding:14px;border-right:1px solid var(--line)}
+.col:last-child{border-right:none}
+.section{margin-bottom:22px}
+.section h2{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin:0 0 8px}
+button{background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:5px;padding:6px 10px;cursor:pointer;font:inherit}
+button:hover{border-color:var(--accent)}
+button.primary{background:#17324a;border-color:#25506e;color:var(--accent)}
+input[type=file]{color:var(--muted);font-size:12px}
+.docitem{padding:8px 10px;border:1px solid var(--line);border-radius:6px;margin-bottom:6px;cursor:pointer;background:var(--panel)}
+.docitem:hover{border-color:var(--accent)}
+.docitem.active{border-color:var(--accent);background:#102331}
+.docitem .n{font-weight:600;word-break:break-all}
+.docitem .m{color:var(--muted);font-size:11px}
+.rev{border:1px solid var(--line);border-radius:6px;padding:8px 10px;margin-bottom:8px;background:var(--panel);position:relative}
+.rev .rid{font-weight:700;color:var(--accent)}
+.rev .kind{float:right;font-size:11px;color:var(--muted)}
+.rev table{width:100%;font-size:11px;color:var(--muted);margin-top:4px}
+.rev td{padding:1px 0}
+.objrow{display:grid;grid-template-columns:64px 52px 1fr 52px;gap:6px;align-items:center;padding:5px 8px;border:1px solid var(--line);border-radius:5px;margin-bottom:4px;background:var(--panel);cursor:pointer}
+.objrow:hover{border-color:var(--accent)}
+.objrow.sel{border-color:var(--accent);background:#102331}
+.pill{font-size:10px;padding:1px 6px;border-radius:10px;border:1px solid var(--line)}
+.pill.declared{color:var(--decl);border-color:#235}.pill.heuristic{color:var(--heur);border-color:#426}
+.pill.objstm{color:var(--objstm)}.pill.free{color:var(--free)}
+.pill.confirmed{color:var(--accent2);border-color:#2c5}
+.pill.pending{color:var(--warn)}.pill.rejected{color:var(--err)}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}
+.diag{border-left:3px solid var(--line);padding:6px 10px;margin-bottom:6px;background:var(--panel);border-radius:0 5px 5px 0}
+.diag.error{border-left-color:var(--err)} .diag.warning{border-left-color:var(--warn)} .diag.info{border-left-color:var(--accent)}
+.diag .code{color:var(--muted);font-size:11px}
+pre{background:#0b0f14;border:1px solid var(--line);border-radius:6px;padding:10px;overflow:auto;max-height:320px;font-size:11px;white-space:pre}
+.kvs{width:100%;border-collapse:collapse;font-size:12px}
+.kvs td{border-bottom:1px solid var(--line);padding:3px 4px;vertical-align:top}
+.kvs td.k{color:var(--muted);width:120px;word-break:break-all}
+.kv{font-size:12px}
+.cand{border:1px solid var(--line);border-radius:6px;padding:10px;margin-bottom:10px;background:var(--panel)}
+.cand.win{border-color:var(--accent2)}
+.cand.lose{opacity:.75}
+.cand h3{margin:0 0 6px;font-size:13px}
+.edge{font-size:11px;color:var(--muted);margin:2px 0}
+.trail{font-size:11px;background:var(--panel);border:1px dashed var(--warn);border-radius:5px;padding:6px 8px;margin-bottom:6px;word-break:break-all}
+.muted{color:var(--muted)}
+.ok{color:var(--accent2)} .bad{color:var(--err)} .wn{color:var(--warn)}
+svg.graph{background:#0b0f14;border:1px solid var(--line);border-radius:6px;width:100%;height:260px}
+.tabs{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap}
+.tabs button.on{border-color:var(--accent);color:var(--accent)}
+.scrollbox{max-height:240px;overflow:auto}
+a{color:var(--accent)}
+.notice{background:#102331;border:1px solid #25506e;color:var(--accent);border-radius:6px;padding:8px 10px;margin-bottom:10px;font-size:12px}
+</style>
+</head>
+<body>
+<header>
+  <h1>页脉探针</h1>
+  <span class="sub">PDF 增量修订 · 对象版本图 · 原始字节取证（只读，绝不重写原文件）</span>
+  <span class="badge" id="docmeta">未导入</span>
+  <span style="flex:1"></span>
+  <input type="file" id="file" accept="application/pdf,.pdf">
+  <button class="primary" id="uploadBtn">导入 PDF</button>
+  <button id="exportBtn" disabled>导出审阅清单与对象字节</button>
+</header>
+<main>
+  <!-- left -->
+  <div class="col" id="leftCol">
+    <div class="section">
+      <h2>文档库</h2>
+      <div id="docList"><div class="muted">尚无文档。</div></div>
+    </div>
+    <div class="section">
+      <h2>修订时间轴（旧 → 新）</h2>
+      <div id="revisions"><div class="muted">导入后显示。</div></div>
+    </div>
+    <div class="section">
+      <h2>损坏诊断</h2>
+      <div id="diagnostics"></div>
+    </div>
+    <div class="section">
+      <h2>未被 xref 引用的尾随数据</h2>
+      <div id="trailing"></div>
+    </div>
+  </div>
+
+  <!-- center -->
+  <div class="col" id="centerCol">
+    <div class="notice" id="branchNote" style="display:none"></div>
+    <div class="section">
+      <h2>对象版本图（按对象号 / 代次分组）</h2>
+      <div class="muted" style="margin-bottom:6px">
+        <span class="dot" style="background:var(--decl)"></span>按声明找到
+        <span class="dot" style="background:var(--heur)"></span>启发式找到
+        <span class="dot" style="background:var(--objstm)"></span>对象流内
+        <span class="dot" style="background:var(--free)"></span>free 条目
+        &nbsp;·&nbsp; <span class="wn">黄</span>=竞争待人工裁决，不以最晚偏移自动决定
+      </div>
+      <div id="objectList"></div>
+    </div>
+  </div>
+
+  <!-- right -->
+  <div class="col" id="rightCol">
+    <div class="section" id="detailEmpty">
+      <h2>对象详情</h2>
+      <div class="muted">在中间选择一个对象，查看其原始字节范围、解析值、所属修订与引用关系。</div>
+    </div>
+    <div id="detail" style="display:none">
+      <div class="section">
+        <h2 id="detailTitle">对象</h2>
+        <div id="refBy"></div>
+      </div>
+      <div class="section">
+        <h2>候选版本与证据</h2>
+        <div id="candidates"></div>
+      </div>
+      <div class="section">
+        <h2>对象关系图</h2>
+        <svg class="graph" id="graph"></svg>
+      </div>
+      <div class="section">
+        <h2>原始十六进制片段</h2>
+        <div class="tabs" id="hexTabs"></div>
+        <pre id="hexView">选择一个候选。</pre>
+      </div>
+    </div>
+  </div>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>
