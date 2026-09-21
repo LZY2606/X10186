@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>页脉探针</title>
+<style>
+:root{
+  --bg:#0f141b; --panel:#161d28; --panel2:#1c2532; --line:#273242;
+  --ink:#e6edf3; --muted:#8b9bb0; --accent:#4ea1ff; --good:#3ddc97;
+  --warn:#ffb454; --bad:#ff6b6b; --heur:#c792ea; --decl:#4ea1ff;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
+header{padding:14px 22px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:16px;background:linear-gradient(180deg,#131a24,#10161f)}
+header h1{font-size:19px;margin:0;letter-spacing:2px}
+header .sub{color:var(--muted);font-size:12px}
+.tabs{display:flex;gap:4px;padding:0 22px;background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+.tab{padding:10px 16px;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;user-select:none}
+.tab.active{color:var(--ink);border-bottom-color:var(--accent)}
+main{padding:18px 22px;max-width:1500px;margin:0 auto}
+.panel{display:none}.panel.active{display:block}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:14px}
+.card h2{font-size:14px;margin:0 0 10px;color:var(--accent)}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+button{background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:7px 14px;cursor:pointer;font-size:13px}
+button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);color:#08121f;border-color:var(--accent);font-weight:600}
+input[type=file],input[type=text],select{background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:7px 10px}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+th,td{border-bottom:1px solid var(--line);padding:6px 9px;text-align:left;vertical-align:top}
+th{color:var(--muted);font-weight:600;position:sticky;top:43px;background:var(--panel)}
+tr.clickable{cursor:pointer}tr.clickable:hover{background:#1a2433}
+.badge{display:inline-block;padding:1px 7px;border-radius:99px;font-size:11px;font-weight:600}
+.badge.declared{background:rgba(78,161,255,.16);color:var(--decl)}
+.badge.heuristic{background:rgba(199,146,234,.16);color:var(--heur)}
+.badge.bad{background:rgba(255,107,107,.16);color:var(--bad)}
+.badge.good{background:rgba(61,220,151,.16);color:var(--good)}
+.badge.warn{background:rgba(255,180,84,.16);color:var(--warn)}
+.timeline{display:flex;gap:0;overflow-x:auto;padding:8px 0}
+.revnode{min-width:200px;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-right:10px;background:var(--panel2);position:relative}
+.revnode table{font-size:11.5px}
+.revnode th{position:static;background:none}
+.arrow{align-self:center;color:var(--muted);margin-right:10px}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+pre.hex{background:#0c1118;border:1px solid var(--line);border-radius:8px;padding:10px;font-size:11.5px;overflow:auto;max-height:360px}
+.kv{display:grid;grid-template-columns:130px 1fr;gap:4px 12px;font-size:12.5px}
+.kv dt{color:var(--muted)}.kv dd{margin:0;word-break:break-all}
+.details{display:grid;grid-template-columns:minmax(360px,1fr) minmax(360px,1fr);gap:14px}
+@media(max-width:1000px){.details{grid-template-columns:1fr}}
+.diag{border-left:3px solid var(--line);padding:7px 10px;margin-bottom:7px;background:var(--panel2);border-radius:0 8px 8px 0}
+.diag.error{border-left-color:var(--bad)}.diag.warning{border-left-color:var(--warn)}.diag.info{border-left-color:var(--accent)}
+.muted{color:var(--muted)}
+.pill{font-size:11px;color:var(--muted)}
+.ref-link{color:var(--accent);cursor:pointer;text-decoration:underline}
+#graph{width:100%;height:560px;background:#0c1118;border:1px solid var(--line);border-radius:10px}
+.nodeval{background:#0c1118;border:1px solid var(--line);border-radius:8px;padding:10px;font-size:11.5px;max-height:300px;overflow:auto;white-space:pre-wrap;word-break:break-word}
+.branchrow{display:flex;align-items:center;gap:10px;padding:8px;border-bottom:1px solid var(--line)}
+.branchrow.activeb{background:#16233a}
+.amb{border:1px solid var(--warn);border-radius:8px;padding:10px;margin-bottom:9px;background:rgba(255,180,84,.05)}
+.candline{display:flex;gap:8px;align-items:flex-start;padding:4px 0;font-size:12.5px}
+small.code{color:var(--muted);font-family:ui-monospace,monospace}
+.doclist tr.selected{background:#16233a}
+</style>
+</head>
+<body>
+<header>
+  <h1>页脉探针</h1>
+  <span class="sub">PDF 增量修订取证 · 保留原件 · 区分“按声明”与“启发式”</span>
+  <span style="flex:1"></span>
+  <span id="docTitle" class="pill"></span>
+</header>
+<div class="tabs">
+  <div class="tab active" data-tab="import">导入</div>
+  <div class="tab" data-tab="timeline">修订时间轴</div>
+  <div class="tab" data-tab="objects">对象版本</div>
+  <div class="tab" data-tab="graph">关系图</div>
+  <div class="tab" data-tab="damage">损坏诊断</div>
+  <div class="tab" data-tab="candidates">恢复候选/分支</div>
+</div>
+<main>
+  <section id="tab-import" class="panel active">
+    <div class="card">
+      <h2>导入 PDF（按字节保存，绝不重写）</h2>
+      <div class="row">
+        <input type="file" id="fileInput" accept="application/pdf,.pdf"/>
+        <button class="primary" id="uploadBtn">导入并扫描</button>
+        <span id="uploadStatus" class="muted"></span>
+      </div>
+    </div>
+    <div class="card">
+      <h2>已导入文档</h2>
+      <table class="doclist"><thead><tr><th>ID</th><th>文件名</th><th>大小</th><th>SHA-256</th><th>修订</th><th>候选</th><th>时间</th><th></th></tr></thead><tbody id="docBody"></tbody></table>
+    </div>
+    <div id="overview"></div>
+  </section>
+
+  <section id="tab-timeline" class="panel">
+    <div class="card"><h2>修订链（startxref → Prev）</h2><div class="timeline" id="timeline"></div></div>
+    <div class="card"><h2>free entry 代次</h2><div id="frees"></div></div>
+  </section>
+
+  <section id="tab-objects" class="panel">
+    <div class="card">
+      <div class="row" style="margin-bottom:10px">
+        <input type="text" id="objFilter" placeholder="过滤：对象号 / 类型 / 备注"/>
+        <select id="originFilter"><option value="">全部来源</option><option value="declared">按声明</option><option value="heuristic">启发式</option></select>
+        <label class="pill"><input type="checkbox" id="activeOnly"/> 仅当前分支采用</label>
+        <span style="flex:1"></span><span id="objCount" class="pill"></span>
+      </div>
+      <div style="max-height:420px;overflow:auto">
+      <table><thead><tr><th>R</th><th>对象</th><th>来源</th><th>偏移/成员</th><th>头</th><th>类型</th><th>备注</th></tr></thead>
+      <tbody id="objBody"></tbody></table>
+      </div>
+    </div>
+    <div class="details">
+      <div class="card"><h2>对象详情</h2><div id="objDetail" class="muted">在左表选择一个对象版本。</div></div>
+      <div class="card"><h2>原始十六进制片段（原件字节）</h2><div id="hexWrap" class="muted">选择对象后显示。</div></div>
+    </div>
+  </section>
+
+  <section id="tab-graph" class="panel">
+    <div class="card">
+      <div class="row" style="margin-bottom:8px">
+        <h2 style="margin:0">对象引用关系图</h2>
+        <span style="flex:1"></span>
+        <input type="text" id="graphRoot" placeholder="聚焦对象号（可选）"/>
+        <button id="graphDraw">绘制</button>
+      </div>
+      <svg id="graph"></svg>
+    </div>
+  </section>
+
+  <section id="tab-damage" class="panel">
+    <div class="card"><h2>损坏诊断</h2><div id="diags"></div></div>
+    <div class="card"><h2>未声明/尾随字节</h2><div id="gaps"></div></div>
+  </section>
+
+  <section id="tab-candidates" class="panel">
+    <div class="card">
+      <h2>解释分支</h2>
+      <div id="branchList"></div>
+      <div class="row" style="margin-top:10px">
+        <input type="text" id="forkName" placeholder="新分支名称，如：采纳42号偏移恢复"/>
+        <button id="forkBtn">从当前分支派生</button>
+        <a id="exportLink" href="#"><button class="primary">导出审阅清单与对象字节(ZIP)</button></a>
+      </div>
+    </div>
+    <div class="card"><h2>竞争候选 — 人工确认（不按最晚偏移裁决）</h2><div id="ambList"></div></div>
+  </section>
+</main>
+<script>
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const state={doc:null,branches:[],branchId:null,active:new Map(),selected:null,eff:{}};
+function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function api(path,opt){return fetch(path,opt).then(async r=>{if(!r.ok)throw new Error((await r.json().catch(()=>({}))).error||r.status);const ct=r.headers.get('content-type')||'';return ct.includes('json')?r.json():r})}
+$$('.tab').forEach(t=>t.onclick=()=>{$$('.tab').forEach(x=>x.classList.remove('active'));$$('.panel').forEach(x=>x.classList.remove('active'));t.classList.add('active');$('#tab-'+t.dataset.tab).classList.add('active');if(t.dataset.tab==='graph')drawGraph();});
+
+async function loadDocs(){
+  const docs=await api('/api/documents');
+  $('#docBody').innerHTML=docs.map(d=>`<tr class="clickable" data-id="${d.id}">
+    <td>${d.id}</td><td>${esc(d.file_name)}</td><td>${d.size}</td>
+    <td class="mono" style="font-size:11px">${esc(d.sha256.slice(0,16))}…</td>
+    <td>${d.revisions||''}</td><td>${d.candidates||''}</td><td class="pill">${esc(d.uploaded_at)}</td>
+    <td><button data-open="${d.id}">打开</button></td></tr>`).join('')||'<tr><td colspan="8" class="muted">尚无文档</td></tr>';
+  $$('#docBody [data-open]').forEach(b=>b.onclick=e=>{e.stopPropagation();openDoc(b.dataset.open)});
+  $$('#docBody tr[data-id]').forEach(tr=>tr.onclick=()=>openDoc(tr.dataset.id));
+}
+$('#uploadBtn').onclick=async()=>{
+  const f=$('#fileInput').files[0];if(!f){$('#uploadStatus').textContent='请先选择 PDF';return}
+  $('#uploadStatus').textContent='扫描中…';
+  const fd=new FormData();fd.append('file',f);
+  try{const d=await api('/api/documents',{method:'POST',body:fd});$('#uploadStatus').textContent='已导入 #'+d.id;await loadDocs();await openDoc(d.id)}
+  catch(e){$('#uploadStatus').textContent='失败: '+e.message}
+};
+async function openDoc(id){
+  const r=await api('/api/documents/'+id);state.doc=r.document;state.branches=r.branches;
+  state.branchId=(r.branches[0]||{}).id;
+  $('#docTitle').textContent=`#${state.doc.id} ${state.doc.file_name} · ${state.doc.size}B · ${state.doc.sha256.slice(0,12)}`;
+  await refreshDecisions();renderAll();
+  $$('.tab')[1].click();
+}
+async function refreshDecisions(){
+  const d=await api('/api/branches/'+state.branchId+'/decisions');state.eff=d.effective;
+  state.active=new Map(Object.entries(d.effective).map(([k,v])=>[k,v.candidate_id]));
+}
+function rep(){return state.doc.report}
+<script>
+function renderAll(){renderOverview();renderTimeline();renderFrees();renderObjects();renderDiags();renderBranches();renderAmb();updateExport()}
+function renderOverview(){
+  const r=rep();$('#overview').innerHTML=`
+  <div class="card"><h2>概览</h2><dl class="kv">
+   <dt>大小</dt><dd>${r.size} 字节</dd>
+   <dt>SHA-256</dt><dd class="mono">${r.sha256}</dd>
+   <dt>startxref</dt><dd class="mono">[${r.startxrefs.join(', ')}]</dd>
+   <dt>修订数</dt><dd>${r.revisions.length}</dd>
+   <dt>候选</dt><dd>${r.candidates.length}（声明 ${r.candidates.filter(c=>c.origin==='declared').length} / 启发 ${r.candidates.filter(c=>c.origin==='heuristic').length}）</dd>
+   <dt>竞争槽位</dt><dd>${r.ambiguities.length}</dd>
+   <dt>尾随数据</dt><dd>${r.trailing.end>r.trailing.start?r.trailing.start+'-'+r.trailing.end+' ('+(r.trailing.end-r.trailing.start)+'B)':'无'}</dd>
+   <dt>解压限额</dt><dd>${r.limits.max_expand}B ${r.limits.halted?'· 已安全停止: '+r.limits.halt_reason:''}</dd>
+  </dl></div>`;
+}
+function renderTimeline(){
+  const rs=rep().revisions;
+  $('#timeline').innerHTML=rs.map((rv,i)=>`
+   <div class="revnode">
+     <div class="row"><b>R${rv.index}</b>
+       <span class="badge ${rv.kind==='stream'?'heuristic':'declared'}">${rv.kind==='stream'?'xref stream':'table'}</span></div>
+     <table>
+       <tr><th>xref偏移</th><td class="mono">${rv.xref_offset}</td></tr>
+       <tr><th>Prev</th><td class="mono">${rv.prev_present?rv.prev_offset:'<无>'}</td></tr>
+       <tr><th>/Size</th><td>${rv.size}</td></tr>
+       <tr><th>/Root</th><td class="mono">${rv.root?rv.root.num+' '+rv.root.gen+' R':'—'}</td></tr>
+       <tr><th>条目</th><td>${rv.entries.length}</td></tr>
+       <tr><th>%%EOF</th><td class="mono">${rv.eof_start}–${rv.eof_end}</td></tr>
+     </table>${rv.chain_note?`<div class="badge bad">${esc(rv.chain_note)}</div>`:''}
+   </div>${i<rs.length-1?'<div class="arrow">→</div>':''}`).join('')||'<span class="muted">无修订（startxref 链不可读）</span>';
+}
+function renderFrees(){
+  const fs=rep().free_entries;
+  $('#frees').innerHTML=fs.length?`<table><thead><tr><th>R</th><th>对象号</th><th>next-free</th><th>代次</th></tr></thead><tbody>
+    ${fs.map(f=>`<tr><td>${f.revision}</td><td>${f.num}</td><td>${f.next_free}</td><td>${f.generation}</td></tr>`).join('')}</tbody></table>`
+    :'<span class="muted">无 free entry</span>';
+}
+function dictType(n){const t=(n.fields||[]).find(f=>f.key==='Type');return t&&t.value&&t.value.type==='name'?'/'+t.value.name:''}
+function objType(c){
+  const dt=c.node?dictType(c.node):'';
+  if(dt)return dt;
+  if(c.stream)return 'stream';
+  if(c.compressed)return '压缩成员';
+  return c.node?c.node.type:'?';
+}
+function renderObjects(){
+  const q=$('#objFilter').value.trim().toLowerCase(),of=$('#originFilter').value,ao=$('#activeOnly').checked;
+  const rows=rep().candidates.filter(c=>{
+    if(of&&c.origin!==of)return false;
+    if(ao){const k=`${c.revision}:${c.num}:${c.gen}`;if(state.active.get(k)!==c.id)return false}
+    if(q){const hay=[c.num+'',c.gen+'',c.origin,c.source,objType(c),c.note||'',c.id].join(' ').toLowerCase();if(!hay.includes(q))return false}
+    return true;
+  });
+  $('#objCount').textContent=`${rows.length} 个候选`;
+  $('#objBody').innerHTML=rows.map(c=>{
+    const loc=c.compressed?`容器 ${c.container.num}#${c.obj_index}`:`${c.byte_range.start}–${c.byte_range.end}`;
+    return `<tr class="clickable" data-cid="${c.id}">
+      <td>${c.revision}</td>
+      <td class="mono">${c.num} ${c.gen} R</td>
+      <td><span class="badge ${c.origin}">${c.origin==='declared'?'按声明':'启发式'}</span><div class="pill">${esc(c.source)}</div></td>
+      <td class="mono" style="font-size:11px">${loc}</td>
+      <td>${c.header_ok?'<span class="badge good">✓</span>':'<span class="badge bad">✗</span>'}</td>
+      <td>${esc(objType(c))}</td>
+      <td class="pill">${esc(c.note||'')}</td></tr>`;
+  }).join('')||'<tr><td colspan="7" class="muted">无匹配候选</td></tr>';
+  $$('#objBody tr[data-cid]').forEach(tr=>tr.onclick=()=>showCandidate(tr.dataset.cid));
+}
+$('#objFilter').oninput=renderObjects;$('#originFilter').onchange=renderObjects;$('#activeOnly').onchange=renderObjects;
+
+function refLink(k,revHint){return `<span class="ref-link" data-goto="${k.num}:${k.gen}">${k.num} ${k.gen} R</span>`}
+function nodeHTML(n,depth=0){
+  if(!n)return '<span class="muted">—</span>';
+  const pad='  '.repeat(depth);
+  switch(n.type){
+    case 'dict':return '<<\n'+(n.fields||[]).map(f=>`${pad}  /${f.key} ${nodeHTML(f.value,depth+1)}`).join('\n')+`\n${pad}>>`;
+    case 'array':return '['+(n.items||[]).map(x=>nodeHTML(x,depth+1)).join(' ')+']';
+    case 'ref':return `${n.ref?nRef(n.ref):'?'}`;
+    case 'string':return '('+esc(bytesPreview(n.str))+')';
+    case 'name':return '/'+esc(n.name);
+    case 'int':return String(n.int);
+    case 'real':return String(n.real);
+    case 'true':return 'true';case 'false':return 'false';case 'null':return 'null';
+    default:return n.type;
+  }
+}
+function nRef(k){return `${k.num} ${k.gen} R`}
+function bytesPreview(b){if(!b)return'';let s='';for(const x of b.slice(0,80))s+=(x>=32&&x<127)?String.fromCharCode(x):'.';return s+(b.length>80?'…':'')}
+async function showCandidate(cid){
+  state.selected=cid;
+  const c=rep().candidates.find(x=>x.id===cid);if(!c)return;
+  // referenced-by
+  const key={num:c.num,gen:c.gen};
+  const inb=rep().edges.filter(e=>e.to.num===c.num&&e.to.gen===c.gen).map(e=>e.from);
+  const out=[];collectOut(c.node,out);
+  const loc=c.compressed
+    ? `<dt>容器</dt><dd class="mono">${c.container?refLink(c.container):'?'} 成员索引 ${c.obj_index}</dd>
+       <dt>容器字节</dt><dd class="mono">${c.container_range?c.container_range.start+'–'+c.container_range.end:'?'}</dd>
+       <dt>成员范围</dt><dd class="mono">解码后 ${c.byte_range.start}–${c.byte_range.end}</dd>`
+    : `<dt>原始字节</dt><dd class="mono">${c.byte_range.start}–${c.byte_range.end} (${Math.max(0,c.byte_range.end-c.byte_range.start)}B)</dd>`;
+  const streamsi=c.stream?`<dt>stream</dt><dd>
+      长度声明=${c.stream.length_decl} 实际=${c.stream.length_actual} ${c.stream.length_ok?'<span class="badge good">长度✓</span>':'<span class="badge bad">长度不符</span>'}<br/>
+      Filter=[${(c.stream.filters||[]).join(',')||'无'}] 边界=${c.stream.boundary_ok?'✓':'✗'}
+      ${c.stream.expanded?`<br/>已展开 ${c.stream.expanded_size}B`:''}${c.stream.decode_error?`<br/><span class="badge bad">${esc(c.stream.decode_error)}</span>`:''}</dd>`:'';
+  $('#objDetail').innerHTML=`<dl class="kv">
+    <dt>候选ID</dt><dd class="mono" style="font-size:11px">${c.id}</dd>
+    <dt>所属修订</dt><dd>R${c.revision}</dd>
+    <dt>对象</dt><dd class="mono">${c.num} ${c.gen} R</dd>
+    <dt>来源</dt><dd><span class="badge ${c.origin}">${c.origin==='declared'?'按声明找到':'启发式找到'}</span> ${esc(c.source)}</dd>
+    ${loc}${streamsi}
+    <dt>对象头</dt><dd>${c.header_ok?'<span class="badge good">已核验 N G obj…endobj</span>':'<span class="badge bad">未核验</span>'}</dd>
+    <dt>证据/理由</dt><dd>${esc(c.reason)}</dd>
+    ${c.note?`<dt>备注</dt><dd class="badge warn">${esc(c.note)}</dd>`:''}
+    <dt>引用</dt><dd>${out.length?out.map(k=>refLink(k)).join('，'):'—'}</dd>
+    <dt>被引用</dt><dd>${inb.length?[...new Set(inb.map(k=>k.num+':'+k.gen))].map(x=>{const[n,g]=x.split(':');return refLink({num:+n,gen:+g})}).join('，'):'—'}</dd>
+  </dl>
+  <div style="margin-top:10px"><a href="/api/documents/${state.doc.id}/object/${encodeURIComponent(c.id)}/bytes" target="_blank"><button>下载该对象字节</button></a></div>
+  <div class="nodeval" style="margin-top:10px">${esc(nodeHTML(c.node))}</div>`;
+  $$('#objDetail .ref-link').forEach(a=>a.onclick=()=>{const[n,g]=a.dataset.goto.split(':');gotoRef(+n,+g,c.revision)});
+  await loadHex(c);
+}
+function collectOut(n,acc){if(!n)return;if(n.type==='ref'&&n.ref)acc.push(n.ref);(n.fields||[]).forEach(f=>collectOut(f.value,acc));(n.items||[]).forEach(x=>collectOut(x,acc))}
+function gotoRef(num,gen,prefRev){
+  const cs=rep().candidates.filter(c=>c.num===num&&c.gen===gen);
+  let c=cs.find(c=>c.revision===prefRev)||cs[cs.length-1];if(c)showCandidate(c.id);
+}
+async function loadHex(c){
+  const start=c.compressed?(c.container_range?c.container_range.start:0):c.byte_range.start;
+  const len=Math.min(512,Math.max(64,c.compressed?256:c.byte_range.end-c.byte_range.start));
+  const h=await api(`/api/documents/${state.doc.id}/hex?start=${Math.max(0,start)}&length=${len}`);
+  const lines=h.lines.map(l=>`<span style="color:#8b9bb0">${String(l.offset).padStart(8,'0')}</span>  ${l.hex.padEnd(48)}  ${esc(l.ascii)}`).join('\n');
+  $('#hexWrap').innerHTML=`<div class="pill" style="margin-bottom:6px">原件字节 ${h.start}–${h.end}（只读，非重存 PDF）</div><pre class="hex mono">${lines}</pre>`;
+}
+<script>
+function renderDiags(){
+  const ds=rep().diagnostics;
+  $('#diags').innerHTML=ds.length?ds.map(d=>`
+    <div class="diag ${d.severity}">
+      <span class="badge ${d.severity==='error'?'bad':d.severity==='warning'?'warn':'declared'}">${d.severity}</span>
+      <small class="code">${esc(d.code)}</small> R${d.revision}
+      <span class="mono pill">bytes ${d.at.start}-${d.at.end}</span>
+      <div>${esc(d.message)}</div>
+      ${d.evidence?`<pre class="hex mono" style="max-height:80px;margin:6px 0 0">${esc(d.evidence)}</pre>`:''}
+    </div>`).join(''):'<span class="muted">未发现结构性问题</span>';
+  const r=rep();
+  let gapHTML='';
+  if(r.trailing.end>r.trailing.start){
+    gapHTML+=`<div class="diag warning"><b>尾随数据</b> 字节 <span class="mono">${r.trailing.start}-${r.trailing.end}</span>（${r.trailing.end-r.trailing.start}B）
+      位于最后一个 %%EOF 之后，未被 xref 引用。<button data-hex="${r.trailing.start}">查看片段</button></div>`;
+  }
+  gapHTML+=(r.gaps||[]).filter(g=>g.end-g.start>0).map(g=>
+    `<div class="diag info"><b>未声明间隙</b> <span class="mono">${g.start}-${g.end}</span>（${g.end-g.start}B）
+     <button data-hex="${g.start}">查看片段</button></div>`).join('');
+  gapHTML+=(r.covered||[]).map(g=>`<div class="pill">覆盖 ${g.start}-${g.end}</div>`).join(' ');
+  $('#gaps').innerHTML=gapHTML||'<span class="muted">全部字节均被声明/验证覆盖</span>';
+  $$('#gaps [data-hex]').forEach(b=>b.onclick=async()=>{
+    const h=await api(`/api/documents/${state.doc.id}/hex?start=${b.dataset.hex}&length=256`);
+    alert(h.lines.map(l=>String(l.offset).padStart(8,'0')+'  '+l.hex+'  '+l.ascii).join('\n'));
+  });
+}
+function renderBranches(){
+  $('#branchList').innerHTML=state.branches.map(b=>`
+    <div class="branchrow ${b.id===state.branchId?'activeb':''}">
+      <input type="radio" name="br" ${b.id===state.branchId?'checked':''} data-bid="${b.id}"/>
+      <b>#${b.id} ${esc(b.name)}</b>
+      <span class="pill">${b.parent_id?'继承自 #'+b.parent_id:'根分支'}</span>
+      <span class="pill">${esc(b.note||'')}</span>
+      <span style="flex:1"></span><span class="pill">${esc(b.created_at)}</span>
+    </div>`).join('');
+  $$('#branchList input[name=br]').forEach(r=>r.onchange=async()=>{state.branchId=+r.dataset.bid;await refreshDecisions();renderObjects();renderBranches();renderAmb();updateExport()});
+}
+$('#forkBtn').onclick=async()=>{
+  const name=$('#forkName').value.trim();if(!name){alert('请填写新分支名称');return}
+  const b=await api(`/api/documents/${state.doc.id}/branches`,{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({parent_id:state.branchId,name,note:'forked in browser'})});
+  state.branches.push(b);state.branchId=b.id;$('#forkName').value='';
+  await refreshDecisions();renderAll();
+};
+function renderAmb(){
+  const r=rep();
+  $('#ambList').innerHTML=r.ambiguities.length?r.ambiguities.map(a=>{
+    const cs=r.candidates.filter(c=>a.ids.includes(c.id));
+    return `<div class="amb">
+      <div><b>对象 ${a.key.num} ${a.key.gen} R · R${a.revision}</b> <span class="pill">${esc(a.note)}</span></div>
+      ${cs.map(c=>{const cur=state.active.get(`${a.revision}:${a.key.num}:${a.key.gen}`)===c.id;
+        return `<label class="candline">
+          <input type="radio" name="amb-${a.revision}-${a.key.num}-${a.key.gen}" data-cid="${c.id}"
+             data-rev="${a.revision}" data-num="${a.key.num}" data-gen="${a.key.gen}" ${cur?'checked':''}/>
+          <span><span class="badge ${c.origin}">${c.origin==='declared'?'按声明':'启发式'}</span>
+          <small class="code">${c.id}</small>
+          ${c.header_ok?'<span class="badge good">头✓</span>':'<span class="badge bad">头✗</span>'}
+          <span class="mono pill">${c.compressed?'压缩#':''}${c.byte_range.start}-${c.byte_range.end}</span>
+          <button data-inspect="${c.id}">检查</button>
+          <div class="pill">${esc(c.reason)}</div>${c.note?`<div class="pill" style="color:var(--warn)">${esc(c.note)}</div>`:''}
+          </span></label>`;
+      }).join('')}
+    </div>`;
+  }).join(''):'<span class="muted">没有竞争候选；各槽位仅有一个可核验版本。</span>';
+  $$('#ambList input[type=radio]').forEach(rd=>rd.onchange=async()=>{
+    await api('/api/branches/'+state.branchId+'/decisions',{method:'PUT',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({doc_id:state.doc.id,revision:+rd.dataset.rev,obj_num:+rd.dataset.num,obj_gen:+rd.dataset.gen,candidate_id:rd.dataset.cid,note:'confirmed in browser'})});
+    await refreshDecisions();renderObjects();
+  });
+  $$('#ambList [data-inspect]').forEach(b=>b.onclick=()=>{$$('.tab')[2].click();showCandidate(b.dataset.inspect)});
+}
+function updateExport(){
+  $('#exportLink').href=state.doc?`/api/documents/${state.doc.id}/export.zip?branch=${state.branchId}`:'#';
+}
+/* ---------- simple force graph, no external libraries ---------- */
+async function drawGraph(){
+  if(!state.doc)return;
+  const r=rep();const svg=$('#graph');svg.innerHTML='';
+  const W=svg.clientWidth||900,H=560;
+  const rootQ=$('#graphRoot').value.trim();
+  let ids=new Set();r.edges.forEach(e=>{ids.add(e.from.num+':'+e.from.gen);ids.add(e.to.num+':'+e.to.gen)});
+  let nodes=[...ids].map(s=>{const[num,gen]=s.split(':').map(Number);return{num,gen}});
+  const adj=new Map();
+  r.edges.forEach(e=>{const a=e.from.num+':'+e.from.gen,b=e.to.num+':'+e.to.gen;
+    if(!adj.has(a))adj.set(a,[]);adj.get(a).push(b);
+    if(!adj.has(b))adj.set(b,[]);adj.get(b).push(a);});
+  if(rootQ){
+    const keep=new Set([rootQ+':0']);
+    // find any gen matching num
+    const start=[...ids].filter(x=>x.startsWith(rootQ+':'));start.forEach(x=>keep.add(x));
+    for(let depth=0;depth<2;depth++){const fr=[...keep];for(const x of fr)(adj.get(x)||[]).forEach(y=>keep.add(y));}
+    nodes=nodes.filter(n=>keep.has(n.num+':'+n.gen));
+  }
+  const keepSet=new Set(nodes.map(n=>n.num+':'+n.gen));
+  const edges=r.edges.filter(e=>keepSet.has(e.from.num+':'+e.from.gen)&&keepSet.has(e.to.num+':'+e.to.gen));
+  nodes.forEach((n,i)=>{n.x=W/2+Math.cos(i)*220;n.y=H/2+Math.sin(i*2.3)*200;n.vx=0;n.vy=0});
+  const idx=new Map(nodes.map(n=>[n.num+':'+n.gen,n]));
+  for(let it=0;it<260;it++){
+    for(const a of nodes)for(const b of nodes){if(a===b)continue;
+      const dx=a.x-b.x,dy=a.y-b.y,d=Math.hypot(dx,dy)||1,f=2600/(d*d);
+      a.vx+=f*dx;a.vy+=f*dy;}
+    for(const e of edges){const a=idx.get(e.from.num+':'+e.from.gen),b=idx.get(e.to.num+':'+e.to.gen);
+      const dx=b.x-a.x,dy=b.y-a.y,d=Math.hypot(dx,dy)||1,f=(d-130)*0.02;a.vx+=f*dx;a.vy+=f*dy;}
+    nodes.forEach(n=>{n.vx+=(W/2-n.x)*0.002;n.vy+=(H/2-n.y)*0.002;
+      n.x+=Math.max(-6,Math.min(6,n.vx));n.y+=Math.max(-6,Math.min(6,n.vy));n.vx*=0.85;n.vy*=0.85;
+      n.x=Math.max(30,Math.min(W-30,n.x));n.y=Math.max(24,Math.min(H-24,n.y));});
+  }
+  const NS='http://www.w3.org/2000/svg';
+  edges.forEach(e=>{const a=idx.get(e.from.num+':'+e.from.gen),b=idx.get(e.to.num+':'+e.to.gen);
+    const l=document.createElementNS(NS,'line');l.setAttribute('x1',a.x);l.setAttribute('y1',a.y);l.setAttribute('x2',b.x);l.setAttribute('y2',b.y);
+    l.setAttribute('stroke',e.kind==='type2-container'?'#c792ea':'#3a4a61');l.setAttribute('stroke-dasharray',e.kind==='type2-container'?'4 3':'');
+    svg.appendChild(l);});
+  nodes.forEach(n=>{const g=document.createElementNS(NS,'g');g.setAttribute('transform',`translate(${n.x},${n.y})`);g.style.cursor='pointer';
+    const c=document.createElementNS(NS,'circle');c.setAttribute('r',12);c.setAttribute('fill','#1c2532');c.setAttribute('stroke','#4ea1ff');g.appendChild(c);
+    const t=document.createElementNS(NS,'text');t.setAttribute('y',-16);t.setAttribute('fill','#e6edf3');t.setAttribute('font-size','10');t.setAttribute('text-anchor','middle');
+    t.textContent=n.num+(n.gen?(' g'+n.gen):'');g.appendChild(t);
+    g.onclick=()=>{$$('.tab')[2].click();gotoRef(n.num,n.gen,undefined)};
+    svg.appendChild(g);});
+}
+$('#graphDraw').onclick=drawGraph;
+loadDocs();
+</script>
+</body>
+</html>

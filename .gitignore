@@ -34,3 +34,7 @@ coverage/
 .vite/
 .turbo/
 *.tsbuildinfo
+
+# 项目运行数据（SQLite + 原件 + 展开对象）
+data/
+*.db
